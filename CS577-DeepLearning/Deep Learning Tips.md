@@ -1,7 +1,6 @@
 ---
 tags:
   - DeepLearning
-  - Module3
 ---
 
 No good results on training data

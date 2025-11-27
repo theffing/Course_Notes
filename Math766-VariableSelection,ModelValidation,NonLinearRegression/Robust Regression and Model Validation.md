@@ -1,3 +1,7 @@
+---
+tags:
+  - VariableSelection
+---
 
 #### Objectives
 - Describe how we modified the ordinary least squares method to make the regression model more robust to the effect of outliers

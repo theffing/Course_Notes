@@ -1,4 +1,8 @@
---
+---
+tags:
+  - VariableSelection
+---
+
 #### Objectives
 - Poisson Regression vs Ordinary Linear Regression
 - Obtaining Regression Parameters using the Maximum Likelihood method

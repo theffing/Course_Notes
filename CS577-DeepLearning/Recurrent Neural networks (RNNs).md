@@ -1,7 +1,6 @@
 ---
 tags:
   - DeepLearning
-  - Module4
 ---
 
 #### Objectives
@@ -27,3 +26,14 @@ The output of the hidden unit will be saved in memory and will be used in the sa
 ## Jordan Network
 The output of the hidden unit will be saved in memory and will be used backwards?
 ## Bidirectional RNN
+
+---
+## Long Short-term Memory (LSTM)
+
+![[Pasted image 20251127142024.png]]
+![[Pasted image 20251127142045.png]]
+#### Activation function f is usually a sigmoid function
+---
+Between 0 and 1
+Mimics open and close gate
+

@@ -1,3 +1,8 @@
+---
+tags:
+  - VariableSelection
+---
+
 #### Regression Models with Binary Response Variable
 
 i.e. Y = 0 or Y = 1: On or Off, Yes or No, TRUE OR FALSE
