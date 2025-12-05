@@ -1,14 +1,16 @@
 -- eBay Mimic relational database setup for PostgreSQL
 -- Run with: psql -d <database> -f ebay_db.sql
+-- Suppress benign notices about missing tables on drop
+SET client_min_messages TO warning;
 
 BEGIN;
 
 -- Clean slate for repeatable runs
 DROP TABLE IF EXISTS feedback, transaction, bid, user_listing_watch, listing, category, user_account CASCADE;
 
--- === Core tables ===
+--  Core tables 
 CREATE TABLE user_account (
-    user_id         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username        TEXT NOT NULL UNIQUE,
     email           TEXT NOT NULL UNIQUE,
     user_type       TEXT NOT NULL CHECK (user_type IN ('buyer','seller','both')),
@@ -21,7 +23,7 @@ CREATE TABLE user_account (
 );
 
 CREATE TABLE category (
-    category_id    GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    category_id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name           TEXT NOT NULL,
     parent_id      INT REFERENCES category(category_id),
     path           TEXT,
@@ -29,7 +31,7 @@ CREATE TABLE category (
 );
 
 CREATE TABLE listing (
-    listing_id    GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    listing_id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     seller_id     INT NOT NULL REFERENCES user_account(user_id),
     category_id   INT NOT NULL REFERENCES category(category_id),
     title         TEXT NOT NULL,
@@ -53,7 +55,7 @@ CREATE TABLE user_listing_watch (
 );
 
 CREATE TABLE bid (
-    bid_id     GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    bid_id     INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     listing_id INT NOT NULL REFERENCES listing(listing_id),
     user_id    INT NOT NULL REFERENCES user_account(user_id),
     bid_amount NUMERIC(12,2) NOT NULL CHECK (bid_amount > 0),
@@ -63,7 +65,7 @@ CREATE TABLE bid (
 );
 
 CREATE TABLE transaction (
-    transaction_id  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    transaction_id  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     bid_id          INT NOT NULL UNIQUE REFERENCES bid(bid_id),
     listing_id      INT NOT NULL REFERENCES listing(listing_id),
     buyer_id        INT NOT NULL REFERENCES user_account(user_id),
@@ -76,7 +78,7 @@ CREATE TABLE transaction (
 );
 
 CREATE TABLE feedback (
-    feedback_id     GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    feedback_id     INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     transaction_id  INT NOT NULL REFERENCES transaction(transaction_id),
     author_user_id  INT NOT NULL REFERENCES user_account(user_id),
     target_user_id  INT NOT NULL REFERENCES user_account(user_id),
@@ -88,14 +90,40 @@ CREATE TABLE feedback (
     UNIQUE (transaction_id, author_user_id)
 );
 
--- === Indexes ===
+--  Indexes 
+-- Indexes are created to optimize query performance for common access patterns
+
+-- Optimizes queries filtering listings by seller and status (e.g., "Show my active listings")
+-- Query pattern: SELECT * FROM listing WHERE seller_id = ? AND status = 'active'
 CREATE INDEX idx_listing_seller_status ON listing (seller_id, status);
+
+-- Optimizes category-based listing searches (e.g., "Show all Electronics listings")
+-- Query pattern: SELECT * FROM listing WHERE category_id = ?
 CREATE INDEX idx_listing_category ON listing (category_id);
+
+-- Optimizes bid queries to quickly find highest bids for a listing
+-- DESC ordering allows efficient retrieval of top bids without sorting
+-- Query pattern: SELECT * FROM bid WHERE listing_id = ? ORDER BY bid_amount DESC
 CREATE INDEX idx_bid_listing_amount ON bid (listing_id, bid_amount DESC);
+
+-- Optimizes user feedback lookups (e.g., "Show all feedback for user X")
+-- Query pattern: SELECT * FROM feedback WHERE target_user_id = ?
 CREATE INDEX idx_feedback_target ON feedback (target_user_id);
+
+-- Optimizes user watchlist queries (e.g., "Show all listings user X is watching")
+-- Query pattern: SELECT * FROM user_listing_watch WHERE user_id = ?
 CREATE INDEX idx_watch_user ON user_listing_watch (user_id);
 
--- === Functions, triggers, and stored procedures ===
+--  Functions, triggers, and stored procedures 
+
+-- Function: fn_enforce_bid_rules()
+-- Enforces eBay-like bidding rules before a bid is inserted
+-- Business Rules:
+--   1. Bids can only be placed on active listings that haven't ended
+--   2. Bid amount must be at least the starting price
+--   3. Bid amount must be at least $1 more than the current highest bid
+-- Usage: Automatically called by trigger tg_enforce_bid_rules on bid INSERT
+-- Example: When user places bid, this validates it meets all requirements
 CREATE OR REPLACE FUNCTION fn_enforce_bid_rules()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -105,8 +133,8 @@ DECLARE
     l_end       TIMESTAMPTZ;
 BEGIN
     SELECT COALESCE(MAX(bid_amount), 0) INTO current_max FROM bid WHERE listing_id = NEW.listing_id;
-    SELECT start_price, status, end_date INTO start_price, l_status, l_end
-    FROM listing WHERE listing_id = NEW.listing_id FOR UPDATE;
+    SELECT l.start_price, l.status, l.end_date INTO start_price, l_status, l_end
+    FROM listing l WHERE l.listing_id = NEW.listing_id FOR UPDATE;
 
     IF l_status <> 'active' OR NOW() > l_end THEN
         RAISE EXCEPTION 'Listing not active or already ended';
@@ -118,10 +146,22 @@ BEGIN
     RETURN NEW;
 END$$;
 
+-- Trigger: tg_enforce_bid_rules
+-- Automatically validates all bids before insertion
+-- BEFORE INSERT on bid table
+-- Business Impact: Prevents invalid bids, maintains auction integrity
 CREATE TRIGGER tg_enforce_bid_rules
 BEFORE INSERT ON bid
 FOR EACH ROW EXECUTE FUNCTION fn_enforce_bid_rules();
 
+-- Function: fn_update_rating_on_feedback()
+-- Automatically recalculates and updates user rating when feedback is added
+-- Business Rules:
+--   1. User rating is the average of all feedback ratings received
+--   2. Rating is updated in real-time whenever new feedback is added
+--   3. Rating is stored as NUMERIC(4,2) for precision
+-- Usage: Automatically called by trigger tg_update_rating_on_feedback on feedback INSERT
+-- Example: When buyer leaves 5-star feedback, seller's rating is recalculated
 CREATE OR REPLACE FUNCTION fn_update_rating_on_feedback()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -133,10 +173,26 @@ BEGIN
     RETURN NEW;
 END$$;
 
+-- Trigger: tg_update_rating_on_feedback
+-- Purpose: Automatically updates user ratings when feedback is submitted
+-- When: AFTER INSERT on feedback table
+-- Business Impact: Ensures user ratings are always current and accurate
 CREATE TRIGGER tg_update_rating_on_feedback
 AFTER INSERT ON feedback
 FOR EACH ROW EXECUTE FUNCTION fn_update_rating_on_feedback();
 
+-- Procedure: place_bid()
+-- Purpose: Provides a safe interface for placing bids with proper validation
+-- Business Rules:
+--   1. Validates bid through trigger before insertion
+--   2. Supports proxy bidding (automatic bidding up to a maximum)
+-- Parameters:
+--   - p_user_id: ID of user placing the bid
+--   - p_listing_id: ID of listing being bid on
+--   - p_amount: Bid amount
+--   - p_is_proxy: Whether this is a proxy bid (default: FALSE)
+-- Usage: CALL place_bid(1, 5, 100.00, FALSE);
+-- Example: User places $100 bid on listing #5
 CREATE OR REPLACE PROCEDURE place_bid(p_user_id INT, p_listing_id INT, p_amount NUMERIC, p_is_proxy BOOLEAN DEFAULT FALSE)
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -144,6 +200,17 @@ BEGIN
     VALUES (p_listing_id, p_user_id, p_amount, p_is_proxy);
 END$$;
 
+-- Function: finalize_listing()
+-- Purpose: Finalizes an auction listing by determining winner and creating transaction
+-- Business Rules:
+--   1. Only active listings can be finalized
+--   2. Winner is determined by highest bid amount (earliest bid wins ties)
+--   3. If no bids exist, listing status is set to 'ended'
+--   4. If winner exists, creates transaction record and sets listing to 'sold'
+--   5. Automatically generates tracking number
+-- Returns: Transaction ID if successful, NULL if no bids
+-- Usage: SELECT finalize_listing(5);
+-- Example: When auction ends, call this to process the sale
 CREATE OR REPLACE FUNCTION finalize_listing(p_listing_id INT)
 RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
@@ -176,7 +243,7 @@ BEGIN
     RETURN txn_id;
 END$$;
 
--- === Seed data (15+ rows per table) ===
+--  Seed data (15+ rows per table) 
 INSERT INTO user_account (username, email, user_type, account_status, rating, payment_methods, address, phone) VALUES
  ('alice','alice@example.com','both','active',4.8,'["visa"]','1 Main St','111-111-1111'),
  ('bob','bob@example.com','buyer','active',4.5,'["paypal"]','2 Main St','222-222-2222'),
@@ -283,7 +350,16 @@ INSERT INTO feedback (transaction_id, author_user_id, target_user_id, rating, fe
  (14,2,3,2,'negative','Returned item',false,NOW()-INTERVAL '2 day'),
  (15,5,6,2,'negative','Returned',false,NOW()-INTERVAL '2 day');
 
--- === Views and temp table example ===
+--  Views and temp table example 
+
+-- View: v_listing_current_price
+-- Purpose: Provides real-time current price and watcher count for all listings
+-- Business Use Cases:
+--   1. Display current bid price on listing pages (shows highest bid or starting price)
+--   2. Show popularity metrics (watcher count) to encourage bidding
+--   3. Quick overview of listing status and market activity
+-- Query Pattern: SELECT * FROM v_listing_current_price WHERE listing_id = ?
+-- Example: Used by frontend to display "Current bid: $360 (4 watchers)"
 CREATE OR REPLACE VIEW v_listing_current_price AS
 SELECT l.listing_id, l.title, l.status, l.end_date,
        COALESCE(MAX(b.bid_amount), l.start_price) AS current_price,
@@ -293,6 +369,14 @@ LEFT JOIN bid b ON b.listing_id = l.listing_id
 LEFT JOIN user_listing_watch w ON w.listing_id = l.listing_id
 GROUP BY l.listing_id;
 
+-- View: v_user_feedback_summary
+-- Purpose: Aggregates user feedback statistics for reputation display
+-- Business Use Cases:
+--   1. Display user reputation scores on profile pages
+--   2. Show feedback summary in seller/buyer ratings
+--   3. Enable sorting/filtering users by reputation
+-- Query Pattern: SELECT * FROM v_user_feedback_summary WHERE user_id = ?
+-- Example: Shows "User has 10 feedback, 4.5 average rating, 8 positive"
 CREATE OR REPLACE VIEW v_user_feedback_summary AS
 SELECT target_user_id AS user_id,
        COUNT(*) AS total_feedback,
@@ -301,7 +385,24 @@ SELECT target_user_id AS user_id,
 FROM feedback
 GROUP BY target_user_id;
 
--- Session-scoped helper table
+--  Temporary Tables and Data Transformation 
+
+-- Temporary Table: tmp_top_categories
+-- Purpose: Session-scoped table for intermediate data processing and analysis
+-- Business Logic:
+--   1. Aggregates listing counts per category
+--   2. Identifies top 5 most popular categories by listing volume
+--   3. Used for dashboard displays, analytics, or category recommendations
+-- Data Transformation:
+--   - Aggregates: COUNT of listings per category
+--   - Filters: Top 5 categories by listing count
+--   - Sorts: Descending order by popularity
+-- Why Temp Table vs View:
+--   - Temp table allows for further transformations in the same session
+--   - Can be joined with other temp tables for complex analytics
+--   - ON COMMIT DROP ensures no data persistence between sessions
+-- Usage: Created at session start, used for analytics, automatically cleaned up
+-- Example: Dashboard shows "Top Categories: Electronics (5), Fashion (3), ..."
 CREATE TEMP TABLE tmp_top_categories ON COMMIT DROP AS
 SELECT c.category_id, c.name, COUNT(l.listing_id) AS listing_count
 FROM category c
@@ -310,11 +411,38 @@ GROUP BY c.category_id, c.name
 ORDER BY listing_count DESC
 LIMIT 5;
 
--- === Example queries to inspect results ===
+-- Additional Data Transformation Example: Calculate category revenue
+-- This demonstrates more complex business logic using temp tables
+-- Calculates total revenue per category for business analytics
+CREATE TEMP TABLE tmp_category_revenue ON COMMIT DROP AS
+SELECT 
+    c.category_id,
+    c.name AS category_name,
+    COUNT(DISTINCT t.transaction_id) AS transaction_count,
+    SUM(t.final_price) AS total_revenue,
+    AVG(t.final_price)::NUMERIC(12,2) AS avg_transaction_value,
+    MAX(t.final_price) AS highest_sale
+FROM category c
+LEFT JOIN listing l ON l.category_id = c.category_id
+LEFT JOIN transaction t ON t.listing_id = l.listing_id AND t.payment_status = 'paid'
+GROUP BY c.category_id, c.name
+HAVING COUNT(DISTINCT t.transaction_id) > 0
+ORDER BY total_revenue DESC;
+
+--  Example queries to inspect results 
+-- These queries demonstrate the output from views and temp tables
+-- They are executed automatically when the script runs to verify setup
+
+-- Display current prices and watcher counts for first 5 listings
 SELECT * FROM v_listing_current_price ORDER BY listing_id LIMIT 5;
+
+-- Display user feedback summaries
 SELECT * FROM v_user_feedback_summary ORDER BY user_id;
+
+-- Display top categories by listing count
 SELECT * FROM tmp_top_categories;
 
+-- Display category revenue analysis (additional transformation example)
+SELECT * FROM tmp_category_revenue ORDER BY total_revenue DESC;
+
 COMMIT;
-
-
