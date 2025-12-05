@@ -1,0 +1,1 @@
+https://neptune.ai/blog/transfer-learning-guide-examples-for-images-and-text-in-keras
