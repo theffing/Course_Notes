@@ -1,0 +1,313 @@
+SQL Query Log - Deliverable 3
+Taylor Heffington - theffington@hawk.illinoistech.edu
+
+1) User roster with type and rating (baseline user quality view)
+SQL: SELECT user_id, username, user_type, rating FROM user_account ORDER BY user_id;
+ user_id | username | user_type | rating 
+---------+----------+-----------+--------
+       1 | alice    | both      |   4.80
+       2 | bob      | buyer     |   4.50
+       3 | carol    | seller    |   3.60
+       4 | dave     | both      |   4.20
+       5 | erin     | buyer     |   4.00
+       6 | frank    | seller    |   3.50
+       7 | grace    | both      |   4.60
+       8 | heidi    | buyer     |   4.30
+       9 | ivan     | seller    |   4.50
+      10 | judy     | both      |   4.40
+      11 | kate     | buyer     |   3.90
+      12 | leo      | seller    |   4.00
+      13 | mike     | both      |   3.80
+      14 | nina     | buyer     |   4.70
+      15 | oliver   | seller    |   5.00
+(15 rows)
+
+
+2) Top 5 listings by current price (demand signal)
+SQL: SELECT listing_id, title, current_price, watcher_count FROM v_listing_current_price ORDER BY current_price DESC LIMIT 5;
+ listing_id |     title     | current_price | watcher_count 
+------------+---------------+---------------+---------------
+          2 | Gaming Laptop |        880.00 |             4
+         10 | Sofa          |        510.00 |             1
+          3 | DSLR Camera   |        420.00 |             2
+          1 | iPhone 13     |        360.00 |             4
+         14 | Vintage Coin  |        300.00 |             0
+(5 rows)
+
+
+3) Highest bid per listing (competition intensity)
+SQL: SELECT listing_id, COUNT(*) AS bid_count, MAX(bid_amount) AS max_bid FROM bid GROUP BY listing_id ORDER BY bid_count DESC, listing_id;
+ listing_id | bid_count | max_bid 
+------------+-----------+---------
+          1 |         2 |  360.00
+          2 |         2 |  880.00
+          6 |         2 |   40.00
+          7 |         2 |  155.00
+          3 |         1 |  420.00
+          4 |         1 |   60.00
+          5 |         1 |   75.00
+          8 |         1 |   95.00
+          9 |         1 |  260.00
+         10 |         1 |  510.00
+         11 |         1 |   85.00
+(11 rows)
+
+
+4) Feedback summary (reputation leaderboard)
+SQL: SELECT * FROM v_user_feedback_summary ORDER BY avg_rating DESC LIMIT 5;
+ user_id | total_feedback | avg_rating | positives 
+---------+----------------+------------+-----------
+      15 |              2 |       5.00 |         2
+       9 |              2 |       4.50 |         2
+      12 |              2 |       4.00 |         2
+       3 |              5 |       3.60 |         3
+       6 |              4 |       3.50 |         2
+(5 rows)
+
+
+5) Price rank per category (window RANK for intra-category pricing)
+SQL: SELECT c.category_id, c.name, l.listing_id, l.title, COALESCE(MAX(b.bid_amount), l.start_price) AS current_price, RANK() OVER (PARTITION BY c.category_id ORDER BY COALESCE(MAX(b.bid_amount), l.start_price) DESC) AS price_rank FROM listing l JOIN category c ON c.category_id = l.category_id LEFT JOIN bid b ON b.listing_id = l.listing_id GROUP BY l.listing_id, c.category_id, c.name ORDER BY c.category_id, price_rank;
+ category_id |      name      | listing_id |       title       | current_price | price_rank 
+-------------+----------------+------------+-------------------+---------------+------------
+           1 | Electronics    |         15 | Bluetooth Speaker |         40.00 |          1
+           2 | Phones         |          1 | iPhone 13         |        360.00 |          1
+           3 | Laptops        |          2 | Gaming Laptop     |        880.00 |          1
+           4 | Cameras        |          3 | DSLR Camera       |        420.00 |          1
+           5 | Fashion        |          9 | Sneakers Bulk     |        260.00 |          1
+           6 | Shoes          |          4 | Running Shoes     |         60.00 |          1
+           7 | Men Clothing   |          7 | Men Jacket        |        155.00 |          1
+           8 | Women Clothing |          8 | Women Dress       |         95.00 |          1
+           9 | Home           |         10 | Sofa              |        510.00 |          1
+          10 | Furniture      |          5 | Coffee Table      |         75.00 |          1
+          11 | Books          |          6 | Sci-fi Book Set   |         40.00 |          1
+          12 | Sports         |         11 | Tennis Racket     |         85.00 |          1
+          13 | Outdoors       |         12 | Camping Tent      |        150.00 |          1
+          14 | Toys           |         13 | Lego Set          |        200.00 |          1
+          15 | Collectibles   |         14 | Vintage Coin      |        300.00 |          1
+(15 rows)
+
+
+6) Cumulative bid amounts per listing (window SUM for momentum)
+SQL: SELECT listing_id, bid_id, bid_amount, bid_time, SUM(bid_amount) OVER (PARTITION BY listing_id ORDER BY bid_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_bid_amount FROM bid ORDER BY listing_id, bid_time;
+ listing_id | bid_id | bid_amount |           bid_time            | cumulative_bid_amount 
+------------+--------+------------+-------------------------------+-----------------------
+          1 |      1 |     320.00 | 2025-12-03 17:15:51.824925-08 |                320.00
+          1 |      2 |     360.00 | 2025-12-04 05:15:51.824925-08 |                680.00
+          2 |      3 |     820.00 | 2025-12-04 09:15:51.824925-08 |                820.00
+          2 |      4 |     880.00 | 2025-12-04 15:15:51.824925-08 |               1700.00
+          3 |      5 |     420.00 | 2025-12-03 17:15:51.824925-08 |                420.00
+          4 |      6 |      60.00 | 2025-12-04 12:15:51.824925-08 |                 60.00
+          5 |      7 |      75.00 | 2025-12-04 07:15:51.824925-08 |                 75.00
+          6 |      8 |      35.00 | 2025-12-03 17:15:51.824925-08 |                 35.00
+          6 |      9 |      40.00 | 2025-12-04 14:15:51.824925-08 |                 75.00
+          7 |     10 |     130.00 | 2025-12-04 13:15:51.824925-08 |                130.00
+          7 |     11 |     155.00 | 2025-12-04 16:15:51.824925-08 |                285.00
+          8 |     12 |      95.00 | 2025-12-04 11:15:51.824925-08 |                 95.00
+          9 |     13 |     260.00 | 2025-12-04 12:15:51.824925-08 |                260.00
+         10 |     14 |     510.00 | 2025-12-04 10:15:51.824925-08 |                510.00
+         11 |     15 |      85.00 | 2025-12-04 14:15:51.824925-08 |                 85.00
+(15 rows)
+
+
+7) Bid increments per listing (window LAG to show step-ups)
+SQL: SELECT listing_id, bid_id, user_id, bid_amount, bid_time, bid_amount - LAG(bid_amount) OVER (PARTITION BY listing_id ORDER BY bid_time) AS increment FROM bid ORDER BY listing_id, bid_time;
+ listing_id | bid_id | user_id | bid_amount |           bid_time            | increment 
+------------+--------+---------+------------+-------------------------------+-----------
+          1 |      1 |       2 |     320.00 | 2025-12-03 17:15:51.824925-08 |          
+          1 |      2 |       4 |     360.00 | 2025-12-04 05:15:51.824925-08 |     40.00
+          2 |      3 |       1 |     820.00 | 2025-12-04 09:15:51.824925-08 |          
+          2 |      4 |       5 |     880.00 | 2025-12-04 15:15:51.824925-08 |     60.00
+          3 |      5 |       7 |     420.00 | 2025-12-03 17:15:51.824925-08 |          
+          4 |      6 |       8 |      60.00 | 2025-12-04 12:15:51.824925-08 |          
+          5 |      7 |      13 |      75.00 | 2025-12-04 07:15:51.824925-08 |          
+          6 |      8 |       2 |      35.00 | 2025-12-03 17:15:51.824925-08 |          
+          6 |      9 |       4 |      40.00 | 2025-12-04 14:15:51.824925-08 |      5.00
+          7 |     10 |       5 |     130.00 | 2025-12-04 13:15:51.824925-08 |          
+          7 |     11 |       1 |     155.00 | 2025-12-04 16:15:51.824925-08 |     25.00
+          8 |     12 |      11 |      95.00 | 2025-12-04 11:15:51.824925-08 |          
+          9 |     13 |      14 |     260.00 | 2025-12-04 12:15:51.824925-08 |          
+         10 |     14 |       2 |     510.00 | 2025-12-04 10:15:51.824925-08 |          
+         11 |     15 |       7 |      85.00 | 2025-12-04 14:15:51.824925-08 |          
+(15 rows)
+
+
+8) Revenue by category with ROLLUP (OLAP total line)
+SQL: SELECT c.name AS category, COALESCE(SUM(t.final_price),0) AS revenue FROM category c LEFT JOIN listing l ON l.category_id = c.category_id LEFT JOIN transaction t ON t.listing_id = l.listing_id AND t.payment_status = 'paid' GROUP BY ROLLUP(c.name) ORDER BY revenue DESC NULLS LAST;
+    category    | revenue 
+----------------+---------
+                | 2260.00
+ Laptops        |  880.00
+ Home           |  510.00
+ Phones         |  360.00
+ Men Clothing   |  155.00
+ Women Clothing |   95.00
+ Sports         |   85.00
+ Furniture      |   75.00
+ Shoes          |   60.00
+ Books          |   40.00
+ Outdoors       |       0
+ Cameras        |       0
+ Electronics    |       0
+ Toys           |       0
+ Collectibles   |       0
+ Fashion        |       0
+(16 rows)
+
+
+9) Revenue cube by payment/shipping status (OLAP CUBE)
+SQL: SELECT payment_status, shipping_status, SUM(final_price) AS revenue FROM transaction GROUP BY CUBE(payment_status, shipping_status) ORDER BY payment_status NULLS LAST, shipping_status NULLS LAST;
+ payment_status | shipping_status | revenue 
+----------------+-----------------+---------
+ paid           | delivered       |   60.00
+ paid           | pending         | 1290.00
+ paid           | shipped         |  910.00
+ paid           |                 | 2260.00
+ pending        | pending         |  680.00
+ pending        |                 |  680.00
+ refunded       | returned        | 1305.00
+ refunded       |                 | 1305.00
+                | delivered       |   60.00
+                | pending         | 1970.00
+                | returned        | 1305.00
+                | shipped         |  910.00
+                |                 | 4245.00
+(13 rows)
+
+
+10) Buyers with most bids (engagement leaderboard)
+SQL: SELECT user_id, COUNT(*) AS bid_count FROM bid GROUP BY user_id ORDER BY bid_count DESC, user_id;
+ user_id | bid_count 
+---------+-----------
+       2 |         3
+       1 |         2
+       4 |         2
+       5 |         2
+       7 |         2
+       8 |         1
+      11 |         1
+      13 |         1
+      14 |         1
+(9 rows)
+
+
+11) Sellers with highest paid revenue (top sellers)
+SQL: SELECT seller_id, SUM(final_price) AS revenue FROM transaction WHERE payment_status = 'paid' GROUP BY seller_id ORDER BY revenue DESC;
+ seller_id | revenue 
+-----------+---------
+         6 | 1035.00
+        15 |  585.00
+         3 |  485.00
+         9 |   95.00
+        12 |   60.00
+(5 rows)
+
+
+12) Listings ending soon (operational alert)
+SQL: SELECT listing_id, title, end_date FROM listing WHERE status = 'active' ORDER BY end_date ASC LIMIT 5;
+ listing_id |      title      |           end_date            
+------------+-----------------+-------------------------------
+          5 | Coffee Table    | 2025-12-05 17:15:51.824925-08
+          3 | DSLR Camera     | 2025-12-06 17:15:51.824925-08
+          6 | Sci-fi Book Set | 2025-12-07 17:15:51.824925-08
+          2 | Gaming Laptop   | 2025-12-08 17:15:51.824925-08
+          9 | Sneakers Bulk   | 2025-12-08 17:15:51.824925-08
+(5 rows)
+
+
+13) Watchlist counts per user (demand intent)
+SQL: SELECT u.username, COUNT(w.listing_id) AS watch_count FROM user_account u LEFT JOIN user_listing_watch w ON u.user_id = w.user_id GROUP BY u.user_id, u.username ORDER BY watch_count DESC, username;
+ username | watch_count 
+----------+-------------
+ bob      |           2
+ dave     |           2
+ erin     |           2
+ grace    |           2
+ alice    |           1
+ heidi    |           1
+ ivan     |           1
+ judy     |           1
+ kate     |           1
+ mike     |           1
+ nina     |           1
+ carol    |           0
+ frank    |           0
+ leo      |           0
+ oliver   |           0
+(15 rows)
+
+
+14) Feedback sentiment per user (CX signal)
+SQL: SELECT target_user_id AS user_id, SUM(CASE WHEN feedback_type='positive' THEN 1 ELSE 0 END) AS positives, SUM(CASE WHEN feedback_type='negative' THEN 1 ELSE 0 END) AS negatives, SUM(CASE WHEN feedback_type='neutral' THEN 1 ELSE 0 END) AS neutrals FROM feedback GROUP BY target_user_id ORDER BY positives DESC, negatives ASC;
+ user_id | positives | negatives | neutrals 
+---------+-----------+-----------+----------
+       3 |         3 |         1 |        1
+       9 |         2 |         0 |        0
+      15 |         2 |         0 |        0
+      12 |         2 |         0 |        0
+       6 |         2 |         1 |        1
+(5 rows)
+
+
+15) Active auctions below reserve (at-risk listings)
+SQL: SELECT l.listing_id, l.title, l.reserve_price, COALESCE((SELECT MAX(bid_amount) FROM bid b WHERE b.listing_id = l.listing_id), l.start_price) AS current_price FROM listing l WHERE l.status = 'active' AND l.reserve_price IS NOT NULL AND l.reserve_price > COALESCE((SELECT MAX(bid_amount) FROM bid b2 WHERE b2.listing_id = l.listing_id), l.start_price);
+ listing_id |     title     | reserve_price | current_price 
+------------+---------------+---------------+---------------
+          2 | Gaming Laptop |        900.00 |        880.00
+          3 | DSLR Camera   |        450.00 |        420.00
+          5 | Coffee Table  |         80.00 |         75.00
+          8 | Women Dress   |        110.00 |         95.00
+         10 | Sofa          |        600.00 |        510.00
+         11 | Tennis Racket |         90.00 |         85.00
+         12 | Camping Tent  |        170.00 |        150.00
+         13 | Lego Set      |        220.00 |        200.00
+         14 | Vintage Coin  |        320.00 |        300.00
+(9 rows)
+
+
+16) Bidding activity in last 24 hours (freshness)
+SQL: SELECT listing_id, COUNT(*) AS bids_last_24h FROM bid WHERE bid_time >= NOW() - INTERVAL '24 hour' GROUP BY listing_id ORDER BY bids_last_24h DESC, listing_id;
+ listing_id | bids_last_24h 
+------------+---------------
+          2 |             2
+          7 |             2
+          1 |             1
+          4 |             1
+          5 |             1
+          6 |             1
+          8 |             1
+          9 |             1
+         10 |             1
+         11 |             1
+(10 rows)
+
+
+17) Top bids with DENSE_RANK (overall price ladder)
+SQL: SELECT bid_id, listing_id, user_id, bid_amount, DENSE_RANK() OVER (ORDER BY bid_amount DESC) AS amount_rank FROM bid ORDER BY bid_amount DESC, bid_time ASC;
+ bid_id | listing_id | user_id | bid_amount | amount_rank 
+--------+------------+---------+------------+-------------
+      4 |          2 |       5 |     880.00 |           1
+      3 |          2 |       1 |     820.00 |           2
+     14 |         10 |       2 |     510.00 |           3
+      5 |          3 |       7 |     420.00 |           4
+      2 |          1 |       4 |     360.00 |           5
+      1 |          1 |       2 |     320.00 |           6
+     13 |          9 |      14 |     260.00 |           7
+     11 |          7 |       1 |     155.00 |           8
+     10 |          7 |       5 |     130.00 |           9
+     12 |          8 |      11 |      95.00 |          10
+     15 |         11 |       7 |      85.00 |          11
+      7 |          5 |      13 |      75.00 |          12
+      6 |          4 |       8 |      60.00 |          13
+      9 |          6 |       4 |      40.00 |          14
+      8 |          6 |       2 |      35.00 |          15
+(15 rows)
+
+
+18) Bid price percentiles (percentile_cont for pricing distribution)
+SQL: SELECT percentile_cont(ARRAY[0.25,0.5,0.75]) WITHIN GROUP (ORDER BY bid_amount) AS bid_amount_percentiles FROM bid;
+ bid_amount_percentiles 
+------------------------
+ {80,155,390}
+(1 row)
+
+
