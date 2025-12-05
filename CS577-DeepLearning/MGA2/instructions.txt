@@ -1,0 +1,13 @@
+In this assignment, our goal is to use PyTorch to implement 
+Recurrent Neural Networks (RNN) for sentiment analysis task. 
+
+Sentiment analysis is to classify sentences (input) into certain 
+sentiments (output labels), which includes positive, negative 
+and neutral.
+
+We will use a benckmark dataset, SST, for this assignment.
+
+we download the SST dataset from torchtext package, and do some 
+preprocessing to build vocabulary and split the dataset into 
+training/validation/test sets. You don't need to modify the code 
+in this step.
